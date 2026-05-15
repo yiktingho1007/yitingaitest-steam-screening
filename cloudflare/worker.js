@@ -1,6 +1,7 @@
 import {
   analyzeSteamReport,
   getLlmStatus,
+  probeLlmConnection,
   translateSteamSearchQuery
 } from "../prototype/llm-analysis.js";
 import {
@@ -17,9 +18,14 @@ export default {
     }
 
     if (url.pathname === "/api/status" && request.method === "GET") {
+      const includeProbe = url.searchParams.get("probe") === "1";
+      const llmStatus = getLlmStatus(env);
+      const llmProbe = includeProbe ? await probeLlmConnection(env) : null;
+
       return jsonResponse(200, {
         ok: true,
-        llm: toPublicLlmStatus(getLlmStatus(env)),
+        llm: toPublicLlmStatus(llmStatus, llmProbe),
+        llm_probe: llmProbe,
         data_mode: "live_target_data"
       });
     }
@@ -185,7 +191,7 @@ function sanitizeAnalysisResult(result) {
   };
 }
 
-function toPublicLlmStatus(status) {
+function toPublicLlmStatus(status, probe = null) {
   return {
     configured: Boolean(status?.configured),
     model: status?.model || "unknown",
@@ -194,6 +200,7 @@ function toPublicLlmStatus(status) {
     fallback_count: Number(status?.fallback_count || 0),
     provider_labels: Array.isArray(status?.provider_labels) ? status.provider_labels : [],
     provider: status?.provider || null,
-    error: status?.error || null
+    error: status?.error || probe?.error || null,
+    reachable: probe ? Boolean(probe.reachable) : null
   };
 }

@@ -1,0 +1,11 @@
+{
+  "name": "steam-screening-edgeone",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:edgeone": "node scripts/build-edgeone.mjs",
+    "dev:edgeone": "edgeone pages dev",
+    "deploy:edgeone": "edgeone pages deploy"
+  }
+}

@@ -93,7 +93,7 @@ https://yitingaitest-steam-screening.workers.dev
 至少检查这几项：
 
 1. 首页能打开
-2. `api/status` 返回 `configured: true`
+2. `api/status?probe=1` 返回 `configured: true` 且 `reachable: true`
 3. 输入 `Balatro` 能返回 live 结果
 4. 输入中文名如 `环世界` 能触发英文重试
 5. 直接访问以下路径应返回 404，而不是敏感内容
@@ -113,3 +113,15 @@ https://yitingaitest-steam-screening.workers.dev
 - Secrets 填写
 
 也就是说，这已经从“开发问题”收缩成了“上线操作问题”。
+
+## 中国大陆访问说明
+
+如果你的公网域名是 `*.workers.dev` 或者整体入口依赖 Cloudflare，中国大陆访问可能会出现打不开、超时或者时好时坏。这通常是部署入口和网络路径问题，不一定是 Worker 代码本身出错。
+
+如果要让中国大陆用户稳定访问，更稳妥的做法是：
+
+- 把前端页面部署到大陆可稳定访问的静态托管或站点入口
+- 把后端 API 部署到可以稳定出站访问 LLM 网关的运行环境
+- 如果前后端不在同一个域名，现在前端已经支持用 `window.STEAM_SCREENING_API_ORIGIN` 或 `?api_origin=https://your-api.example.com` 指向 API
+
+同时，如果线上要给中国大陆用户提供 LLM，建议优先配置大陆可访问的 OpenAI-compatible 网关，而不是只依赖 `https://api.openai.com/v1`。

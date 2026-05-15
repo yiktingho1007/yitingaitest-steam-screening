@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   analyzeSteamReport,
   getLlmStatus,
+  probeLlmConnection,
   translateSteamSearchQuery
 } from "./llm-analysis.js";
 import { buildLiveSteamReport, resolveSteamCandidates } from "./live-steam-data.js";
@@ -42,9 +43,14 @@ export const server = createServer(async (req, res) => {
     }
 
     if (requestUrl.pathname === "/api/status" && req.method === "GET") {
+      const includeProbe = requestUrl.searchParams.get("probe") === "1";
+      const llmStatus = getLlmStatus();
+      const llmProbe = includeProbe ? await probeLlmConnection() : null;
+
       sendJson(res, 200, {
         ok: true,
-        llm: toPublicLlmStatus(getLlmStatus()),
+        llm: toPublicLlmStatus(llmStatus, llmProbe),
+        llm_probe: llmProbe,
         data_mode: "live_target_data"
       });
       return;
@@ -314,7 +320,7 @@ function sanitizeAnalysisResult(result) {
   };
 }
 
-function toPublicLlmStatus(status) {
+function toPublicLlmStatus(status, probe = null) {
   return {
     configured: Boolean(status?.configured),
     model: status?.model || "unknown",
@@ -323,6 +329,7 @@ function toPublicLlmStatus(status) {
     fallback_count: Number(status?.fallback_count || 0),
     provider_labels: Array.isArray(status?.provider_labels) ? status.provider_labels : [],
     provider: status?.provider || null,
-    error: status?.error || null
+    error: status?.error || probe?.error || null,
+    reachable: probe ? Boolean(probe.reachable) : null
   };
 }

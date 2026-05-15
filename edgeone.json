@@ -1,0 +1,6 @@
+{
+  "buildCommand": "node scripts/build-edgeone.mjs",
+  "outputDirectory": "dist",
+  "nodeVersion": "20",
+  "overseasRegions": ["ap-hongkong"]
+}

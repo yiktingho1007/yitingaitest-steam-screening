@@ -14,6 +14,59 @@ export function getLlmStatus(runtimeEnv = process.env) {
   };
 }
 
+export async function probeLlmConnection(runtimeEnv = process.env) {
+  const providers = getConfiguredProviders(runtimeEnv);
+
+  if (!providers.length) {
+    return {
+      configured: false,
+      reachable: false,
+      provider: null,
+      model: null,
+      error: "No LLM provider configured."
+    };
+  }
+
+  const providerErrors = [];
+
+  for (const provider of providers) {
+    try {
+      const response = await fetch(`${provider.base_url}/models`, {
+        method: "GET",
+        headers: buildRequestHeaders(provider.api_key)
+      });
+      const payload = await safeParseJson(response);
+
+      if (!response.ok) {
+        throw new ApiRequestError(
+          extractApiError(payload, response.status),
+          response.status,
+          payload,
+          `${provider.base_url}/models`
+        );
+      }
+
+      return {
+        configured: true,
+        reachable: true,
+        provider: provider.label,
+        model: provider.model,
+        error: null
+      };
+    } catch (error) {
+      providerErrors.push(`${provider.label}: ${normalizeErrorMessage(error)}`);
+    }
+  }
+
+  return {
+    configured: true,
+    reachable: false,
+    provider: providers[0]?.label || null,
+    model: providers[0]?.model || null,
+    error: providerErrors.join(" | ") || "Failed to reach configured LLM provider."
+  };
+}
+
 export async function analyzeSteamReport({ query, report, runtimeEnv = process.env }) {
   assertValidReport(report);
 

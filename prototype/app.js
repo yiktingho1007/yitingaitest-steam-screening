@@ -1,6 +1,6 @@
 const MOCK_REPORTS = globalThis.MOCK_REPORTS || [];
 const LOCAL_BACKEND_ORIGIN = "http://127.0.0.1:4173";
-const PROTOTYPE_ORIGIN = window.location.protocol === "file:" ? LOCAL_BACKEND_ORIGIN : window.location.origin;
+const PROTOTYPE_ORIGIN = resolvePrototypeOrigin();
 
 const LOADING_STEPS = [
   {
@@ -108,7 +108,7 @@ function initialize() {
 
 async function hydrateConnectionStatus() {
   try {
-    const response = await fetch(`${PROTOTYPE_ORIGIN}/api/status`, {
+    const response = await fetch(`${PROTOTYPE_ORIGIN}/api/status?probe=1`, {
       headers: {
         "Accept": "application/json"
       }
@@ -152,6 +152,15 @@ function renderConnectionStatus() {
     return;
   }
 
+  if (state.llmStatus.configured && state.llmStatus.reachable === false) {
+    connectionPillEl.textContent = `LLM 已配置但不可达 · ${state.llmStatus.model}`;
+    setSearchFeedback(
+      `服务端已经读取到模型配置，但部署环境无法连通模型网关。${state.llmStatus.error ? ` (${state.llmStatus.error})` : ""}`,
+      true
+    );
+    return;
+  }
+
   if (state.llmStatus.configured) {
     connectionPillEl.textContent = state.llmStatus.fallback_count
       ? `服务端 LLM · ${state.llmStatus.model} + ${state.llmStatus.fallback_count} 个备用`
@@ -160,6 +169,30 @@ function renderConnectionStatus() {
   }
 
   connectionPillEl.textContent = "未找到服务端模型密钥 · 当前会回退到 mock 总结";
+}
+
+function resolvePrototypeOrigin() {
+  const explicitOrigin = cleanOrigin(globalThis.STEAM_SCREENING_API_ORIGIN);
+
+  if (explicitOrigin) {
+    return explicitOrigin;
+  }
+
+  const queryOrigin = cleanOrigin(new URLSearchParams(window.location.search).get("api_origin"));
+
+  if (queryOrigin) {
+    return queryOrigin;
+  }
+
+  return window.location.protocol === "file:" ? LOCAL_BACKEND_ORIGIN : window.location.origin;
+}
+
+function cleanOrigin(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().replace(/\/+$/, "");
 }
 
 async function handleSearch(event) {
