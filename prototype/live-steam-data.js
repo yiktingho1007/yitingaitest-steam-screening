@@ -1100,10 +1100,11 @@ function buildPlaceholderSummary(targetGame) {
 }
 
 async function fetchGameBundle(appid, options = {}) {
+  const lightweight = Boolean(options.lightweight);
   const [store, reviews, players, spy] = await Promise.all([
     fetchStoreAppDetails(appid),
-    fetchReviewSummary(appid),
-    fetchCurrentPlayers(appid),
+    lightweight ? Promise.resolve({}) : fetchReviewSummary(appid),
+    lightweight ? Promise.resolve({ response: { player_count: 0 } }) : fetchCurrentPlayers(appid),
     options.steamSpyOverride ? Promise.resolve(options.steamSpyOverride) : fetchSteamSpyAppDetails(appid)
   ]);
 
@@ -1284,12 +1285,12 @@ async function findTrackReferenceBundlesForCompetitors(targetAppId, targetBundle
   for (const term of trackTerms) {
     const suggestions = await fetchSearchSuggestions(term);
 
-    for (const suggestion of suggestions.slice(0, 5)) {
+    for (const suggestion of suggestions.slice(0, 3)) {
       if (Number(suggestion.appid) === Number(targetAppId) || seen.has(Number(suggestion.appid))) {
         continue;
       }
 
-      const bundle = await fetchGameBundle(suggestion.appid);
+      const bundle = await fetchGameBundle(suggestion.appid, { lightweight: true });
       if (!isValidTrackReferenceBundle(bundle, targetBundle, term)) {
         continue;
       }
@@ -1300,6 +1301,10 @@ async function findTrackReferenceBundlesForCompetitors(targetAppId, targetBundle
         name: bundle.store?.name || bundle.spy?.name || suggestion.name,
         bundle
       });
+
+      if (bundles.length >= 2) {
+        return bundles;
+      }
     }
   }
 

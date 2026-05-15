@@ -17,29 +17,36 @@ export default async function handler(request) {
     return jsonResponse(204, null);
   }
 
-  const body = await readJsonBody(request);
-  const query = cleanString(body?.query);
-  const appid = Number(body?.appid || 0);
-  const resolvedName = cleanString(body?.resolved_name);
+  try {
+    const body = await readJsonBody(request);
+    const query = cleanString(body?.query);
+    const appid = Number(body?.appid || 0);
+    const resolvedName = cleanString(body?.resolved_name);
 
-  if (!query || !appid) {
-    return jsonResponse(400, {
+    if (!query || !appid) {
+      return jsonResponse(400, {
+        ok: false,
+        error: "query 和 appid 都是必填项。"
+      });
+    }
+
+    const report = await buildLiveSteamReport({
+      query,
+      appid,
+      resolvedName
+    });
+
+    const result = await analyzeSteamReport({
+      query,
+      report,
+      runtimeEnv: buildRuntimeEnv()
+    });
+
+    return jsonResponse(200, sanitizeAnalysisResult(result));
+  } catch (error) {
+    return jsonResponse(500, {
       ok: false,
-      error: "query 和 appid 都是必填项。"
+      error: error instanceof Error ? error.message : "screen failed"
     });
   }
-
-  const report = await buildLiveSteamReport({
-    query,
-    appid,
-    resolvedName
-  });
-
-  const result = await analyzeSteamReport({
-    query,
-    report,
-    runtimeEnv: buildRuntimeEnv()
-  });
-
-  return jsonResponse(200, sanitizeAnalysisResult(result));
 }
