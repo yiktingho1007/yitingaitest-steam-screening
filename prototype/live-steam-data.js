@@ -320,7 +320,7 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, gameplayPro
     trackReferenceBundles: referenceBundles
   });
 
-  if (!targetTags.length) {
+  if (!targetTags.length && !referenceBundles.length) {
     return {
       comparisonFrame,
       candidates: [],
@@ -330,9 +330,9 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, gameplayPro
   }
 
   const preferredAppIds = new Set(seed.preferredAppIds || []);
-  const tagResults = await Promise.all(
-    targetTags.slice(0, 2).map((tag) => fetchSteamSpyTag(tag))
-  );
+  const tagResults = targetTags.length
+    ? await Promise.all(targetTags.slice(0, 2).map((tag) => fetchSteamSpyTag(tag)))
+    : [];
 
   const candidateMap = new Map();
   tagResults.forEach((payload, index) => {
