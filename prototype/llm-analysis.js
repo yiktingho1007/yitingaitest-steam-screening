@@ -115,6 +115,91 @@ export async function analyzeSteamReport({ query, report, runtimeEnv = process.e
   };
 }
 
+export async function discoverCompetitorsViaLlm({ query, report, runtimeEnv = process.env }) {
+  const providers = getConfiguredProviders(runtimeEnv);
+  if (!providers.length) {
+    return {
+      ok: false,
+      suggestions: [],
+      error: "No LLM provider configured."
+    };
+  }
+
+  const developerPrompt = [
+    "你是 Steam 游戏竞品发现助手。",
+    "你的第一任务是先判断目标游戏的核心玩法和玩家心智中的真实赛道，而不是复述标签。",
+    "当系统没有找到稳定竞品时，你需要主动提名 3 到 5 款最可能被玩家拿来对比的 Steam 游戏。",
+    "提名标准优先看：核心循环、合作/对抗模式、节奏混乱度、服务或经营主题、玩家自然联想。",
+    "不要因为单个标签一致就提名竞品。",
+    "请只返回 JSON。",
+    "JSON 只包含 gameplay_summary、comparison_hypothesis、suggested_competitors 三个键。",
+    "suggested_competitors 必须是数组，每项只包含 name、why、role。"
+  ].join("\n");
+
+  const userPrompt = [
+    "系统当前自动竞品不足，请先识别玩法，再提名真实竞品。",
+    "",
+    JSON.stringify({
+      raw_query: query,
+      target_game: pickPromptGame(report.target_game),
+      gameplay_profile: report.gameplay_profile || null,
+      comparison_frame: report.comparison_frame || null,
+      current_candidates: report.competitor_candidates || [],
+      warnings: report.debug_meta?.warnings || []
+    }, null, 2)
+  ].join("\n");
+
+  const providerErrors = [];
+  for (const provider of providers) {
+    try {
+      const result = await requestCompetitorDiscoveryViaProvider({
+        developerPrompt,
+        userPrompt,
+        provider
+      });
+
+      return {
+        ...result,
+        model_name: provider.model
+      };
+    } catch (error) {
+      providerErrors.push(`${provider.label}: ${normalizeErrorMessage(error)}`);
+    }
+  }
+
+  return {
+    ok: false,
+    suggestions: [],
+    error: providerErrors.join(" | ") || "LLM competitor discovery failed."
+  };
+}
+
+async function requestCompetitorDiscoveryViaProvider({ developerPrompt, userPrompt, provider }) {
+  try {
+    const responseText = await requestViaResponsesApi({
+      developerPrompt,
+      userPrompt,
+      provider,
+      mode: "competitor_discovery"
+    });
+
+    return normalizeDiscoveredCompetitors(parseJsonText(responseText), provider.model);
+  } catch (error) {
+    if (!shouldFallbackToChatCompletions(error)) {
+      throw error;
+    }
+  }
+
+  const chatText = await requestViaChatCompletions({
+    developerPrompt,
+    userPrompt,
+    provider,
+    mode: "competitor_discovery"
+  });
+
+  return normalizeDiscoveredCompetitors(parseJsonText(chatText), provider.model);
+}
+
 export async function translateSteamSearchQuery({ query, runtimeEnv = process.env }) {
   const rawQuery = cleanString(query);
 
@@ -488,6 +573,25 @@ function normalizeTranslatedQuery(parsed, rawQuery) {
     translated_query: cleanString(parsed.translated_query),
     confidence: cleanString(parsed.confidence) || "unknown",
     notes: cleanString(parsed.notes)
+  };
+}
+
+function normalizeDiscoveredCompetitors(parsed, modelName) {
+  const items = Array.isArray(parsed?.suggested_competitors) ? parsed.suggested_competitors : [];
+
+  return {
+    ok: items.length > 0,
+    gameplay_summary: cleanString(parsed?.gameplay_summary),
+    comparison_hypothesis: cleanString(parsed?.comparison_hypothesis),
+    suggestions: items
+      .map((item) => ({
+        name: cleanString(item?.name),
+        why: cleanString(item?.why),
+        role: cleanString(item?.role)
+      }))
+      .filter((item) => item.name),
+    model_name: modelName,
+    error: items.length ? null : "LLM did not return competitor suggestions."
   };
 }
 

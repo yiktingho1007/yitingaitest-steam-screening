@@ -1,5 +1,5 @@
-import { analyzeSteamReport } from "../_runtime/llm-analysis.js";
-import { buildLiveSteamReport } from "../_runtime/live-steam-data.js";
+import { analyzeSteamReport, discoverCompetitorsViaLlm } from "../_runtime/llm-analysis.js";
+import { buildLiveSteamReport, hydrateSuggestedCompetitors } from "../_runtime/live-steam-data.js";
 import {
   cleanString,
   jsonResponse,
@@ -29,6 +29,42 @@ export async function onRequestPost(context) {
     appid,
     resolvedName
   });
+
+  const selectedCompetitors = (report.competitor_candidates || []).filter((item) => item.is_selected);
+  if (!selectedCompetitors.length) {
+    const discovery = await discoverCompetitorsViaLlm({
+      query,
+      report,
+      runtimeEnv: context.env || {}
+    });
+
+    if (discovery.ok && discovery.suggestions.length) {
+      const hydrated = await hydrateSuggestedCompetitors({
+        targetAppId: appid,
+        suggestions: discovery.suggestions.map((item) => item.name)
+      });
+
+      report.competitor_candidates = hydrated.candidates;
+      report.competitor_games = hydrated.games;
+      report.comparison_frame = {
+        ...(report.comparison_frame || {}),
+        llm_discovery: {
+          gameplay_summary: discovery.gameplay_summary,
+          comparison_hypothesis: discovery.comparison_hypothesis,
+          suggestions: discovery.suggestions
+        }
+      };
+      report.debug_meta = {
+        ...(report.debug_meta || {}),
+        warnings: [
+          ...new Set([
+            ...((report.debug_meta?.warnings) || []),
+            "自动竞品不足，已触发 LLM 玩法识别与竞品提名。"
+          ])
+        ]
+      };
+    }
+  }
 
   const result = await analyzeSteamReport({
     query,

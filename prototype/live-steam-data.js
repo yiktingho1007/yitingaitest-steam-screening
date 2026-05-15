@@ -295,6 +295,59 @@ async function selectCompetitors({ targetAppId, targetBundle, gameplayProfile })
   };
 }
 
+export async function hydrateSuggestedCompetitors({ targetAppId, suggestions = [] }) {
+  const normalizedSuggestions = normalizeStringArray(suggestions).slice(0, 5);
+  const selected = [];
+  const seen = new Set([Number(targetAppId)]);
+
+  for (const name of normalizedSuggestions) {
+    const candidates = await fetchSearchSuggestions(name);
+    const exactMatch = candidates.find((item) => normalizeText(item.name) === normalizeText(name));
+    const selectedCandidate = exactMatch || candidates.find((item) => !seen.has(Number(item.appid)));
+
+    if (!selectedCandidate) {
+      continue;
+    }
+
+    const numericAppId = Number(selectedCandidate.appid);
+    if (!numericAppId || seen.has(numericAppId)) {
+      continue;
+    }
+
+    seen.add(numericAppId);
+    selected.push({
+      appid: numericAppId,
+      name: selectedCandidate.name
+    });
+
+    if (selected.length >= 3) {
+      break;
+    }
+  }
+
+  const games = await Promise.all(
+    selected.map(async (item) => {
+      const bundle = await fetchGameBundle(item.appid);
+      return buildGameFromBundle(bundle, new Date().toISOString());
+    })
+  );
+
+  return {
+    candidates: selected.map((item, index) => ({
+      app_id: item.appid,
+      name: item.name,
+      total_score: 75 - index * 5,
+      selection_reason: "由 LLM 基于玩法识别提名，再映射回 Steam 产品。",
+      comparison_basis: ["llm_gameplay_discovery"],
+      coordinate_role_hint: "LLM 提名赛道样本",
+      evidence_strength: "medium",
+      role_matches: ["同赛道外部样本"],
+      is_selected: index < 2
+    })),
+    games
+  };
+}
+
 async function selectCompetitorsByFrame({ targetAppId, targetBundle, gameplayProfile, seed, targetTags }) {
   const targetOwners = parseOwnerRange(targetBundle.spy?.owners);
   const targetPrice = normalizeSteamSpyPrice(targetBundle.spy?.price);
