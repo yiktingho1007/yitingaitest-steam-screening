@@ -1,0 +1,33 @@
+### Entry 017
+
+- 日期：2026-05-14
+- 本次目标：把 live 联调结论沉淀成普通本地启动模式，并继续排查为什么当前 4173 仍然回退到 mock
+- 已完成工作：
+  - 新增网关探测脚本 `prototype/gateway-probe.mjs`
+  - 新增普通本地启动脚本：
+    - `prototype/run-live-server.ps1`
+    - `prototype/start-live-prototype.cmd`
+  - 新增本地 live 模式说明：
+    - `prototype/LOCAL-LIVE-MODE.md`
+  - 为结果页补充更明确的系统提示，避免把 `EACCES` 误判成 key 或网关失效
+  - 实测确认：
+    - `/models` 可返回 `200`
+    - `gpt-5.4-mini` 的 `chat/completions` 可返回 `200`
+    - shell 临时启动的本地服务可以返回 `analysis_mode: live`
+    - 当前常驻 4173 服务仍会因为 `connect EACCES 103.201.130.161:443` 回退到 mock
+- 已做决策：
+  - 不把密钥暴露给前端浏览器
+  - 继续坚持“后端持钥，前端只请求本地服务”
+  - 将“普通本地启动模式”作为下一阶段的默认运行方式
+- 新增或修改文件：
+  - `prototype/gateway-probe.mjs`
+  - `prototype/run-live-server.ps1`
+  - `prototype/start-live-prototype.cmd`
+  - `prototype/LOCAL-LIVE-MODE.md`
+  - `prototype/package.json`
+  - `prototype/app.js`
+  - `docs/steam-screening-live-debug-note-2026-05-14.md`
+  - `docs/steam-screening-execution-log-entry-017.md`
+- 下一步：
+  - 把正在浏览器里访问的 4173 服务切换到普通本地运行环境
+  - 在此基础上开始接第一批真实 Steam 字段

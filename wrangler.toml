@@ -1,0 +1,11 @@
+name = "yitingaitest-steam-screening"
+main = "cloudflare/worker.js"
+compatibility_date = "2026-05-15"
+workers_dev = true
+
+[assets]
+directory = "./prototype"
+binding = "ASSETS"
+
+[observability.logs]
+enabled = true

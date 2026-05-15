@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Steam 产品初筛原型</title>
+    <link rel="stylesheet" href="./styles.css?v=20260515g" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <section id="search-screen" class="screen search-screen">
+        <div class="search-stage">
+          <p class="eyebrow">Lilith Research Prototype</p>
+          <h1>输入一个 Steam 游戏名，看它值不值得研究。</h1>
+          <p class="search-copy">
+            当前这版原型已经接上真实公开数据拉取和真实 LLM 请求。
+            输入游戏名后，会先识别对应的 Steam 产品，再生成目标产品和竞品的初筛分析。
+          </p>
+
+          <div class="status-strip">
+            <span id="connection-pill" class="meta-pill">正在检查 LLM 连接状态...</span>
+            <span class="meta-pill">结构化数据：Live</span>
+          </div>
+
+          <form id="query-form" class="search-form">
+            <div class="search-box">
+              <input
+                id="query-input"
+                name="query"
+                type="text"
+                placeholder="例如：Balatro / Hades / Schedule"
+                autocomplete="off"
+              />
+              <button id="analyze-button" type="submit">开始分析</button>
+            </div>
+            <p id="search-feedback" class="search-feedback">
+              支持模糊输入。如果命中多个候选，会先让你选定目标产品，再进入正式分析。
+            </p>
+          </form>
+
+          <div class="sample-row">
+            <span class="sample-label">快速体验</span>
+            <div id="quick-cases" class="quick-cases"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="candidate-screen" class="screen candidate-screen hidden">
+        <div class="candidate-stage">
+          <p class="eyebrow">Candidate Selection</p>
+          <h2>找到了多个可能的游戏</h2>
+          <p id="candidate-query" class="search-copy">
+            请先从下面的候选里选定目标产品，再进入正式分析。
+          </p>
+          <div id="candidate-options" class="candidate-options"></div>
+          <div class="candidate-actions">
+            <button id="candidate-back-button" type="button" class="back-button">返回搜索</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="loading-screen" class="screen loading-screen hidden">
+        <div class="loading-stage">
+          <div class="loading-mark">
+            <div class="loading-ring"></div>
+            <div class="loading-core"></div>
+          </div>
+          <p class="eyebrow">LLM + Steam Data Flow</p>
+          <h2>正在生成这款游戏的初筛结果</h2>
+          <p id="loading-copy" class="loading-copy">
+            系统正在整理结构化数据、准备对比上下文，并请求 LLM 生成本次分析结论。
+          </p>
+
+          <div id="loading-steps" class="loading-steps"></div>
+        </div>
+      </section>
+
+      <section id="result-screen" class="screen result-screen hidden">
+        <header class="result-topbar">
+          <button id="back-button" type="button" class="back-button">重新搜索</button>
+          <div class="result-topbar-meta">
+            <span id="result-mode-pill" class="meta-pill">LLM 状态</span>
+            <span class="meta-pill">结构化数据：Live</span>
+            <span class="meta-pill">单路径原型</span>
+          </div>
+        </header>
+
+        <main class="result-layout">
+          <section class="result-hero panel">
+            <div class="result-hero-copy">
+              <p class="eyebrow">Target Game</p>
+              <h2 id="result-title"></h2>
+              <p id="result-subtitle" class="result-subtitle"></p>
+              <p id="result-mapping-note" class="mapping-note"></p>
+              <div id="result-tags" class="tag-list"></div>
+            </div>
+            <div class="hero-metrics">
+              <div class="metric-card">
+                <span class="metric-label">Steam 评价</span>
+                <strong id="hero-review"></strong>
+                <span id="hero-review-meta" class="metric-meta"></span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">当前在线</span>
+                <strong id="hero-players"></strong>
+                <span id="hero-players-meta" class="metric-meta"></span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">第三方拥有量估算</span>
+                <strong id="hero-estimate"></strong>
+                <span id="hero-estimate-meta" class="metric-meta"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel compare-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Compare</p>
+                <h3>这两款竞品为什么适合和它比较</h3>
+              </div>
+              <span class="meta-pill">自动挑选 2 款</span>
+            </div>
+
+            <div class="compare-context">
+              <article class="compare-context-card compare-context-main">
+                <span class="compare-context-label">比较坐标系</span>
+                <h4 id="comparison-frame-title">这款游戏应该放在什么坐标系里看</h4>
+                <p id="comparison-frame-summary"></p>
+              </article>
+              <article class="compare-context-card compare-context-axes">
+                <span class="compare-context-label">重点维度</span>
+                <div id="comparison-axes" class="axis-list"></div>
+              </article>
+            </div>
+            <div id="compare-cards" class="compare-cards"></div>
+            <div id="comparison-table" class="table-shell"></div>
+          </section>
+
+          <section class="panel conclusion-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">LLM Summary</p>
+                <h3>先给研究员一个明确判断</h3>
+              </div>
+              <span id="llm-status-chip" class="meta-pill">分析完成</span>
+            </div>
+            <div class="conclusion-grid">
+              <article class="statement">
+                <h4>一句话定位</h4>
+                <p id="positioning-summary"></p>
+              </article>
+              <article class="statement">
+                <h4>是否值得继续深挖</h4>
+                <p id="screening-recommendation"></p>
+              </article>
+            </div>
+            <div id="difference-points" class="difference-points"></div>
+            <div class="risk-box">
+              <strong>数据边界</strong>
+              <p id="data-caution"></p>
+            </div>
+          </section>
+
+          <section class="panel source-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Traceability</p>
+                <h3>来源分层与运行说明</h3>
+              </div>
+            </div>
+            <div class="source-grid">
+              <div id="source-summary"></div>
+              <div id="debug-meta"></div>
+            </div>
+          </section>
+
+          <details class="panel raw-panel">
+            <summary>查看当前原始数据</summary>
+            <p class="raw-hint">
+              这里展示的是当前结果页使用的完整 JSON，包含实时拉取的公开字段和 LLM 输出，方便对照字段字典、接口契约和 prompt 设计。
+            </p>
+            <pre id="raw-data-viewer" class="raw-data-viewer"></pre>
+          </details>
+        </main>
+      </section>
+
+      <section id="error-screen" class="screen result-screen hidden">
+        <main class="result-layout">
+          <section class="panel error-panel">
+            <p class="eyebrow">Prototype Fallback</p>
+            <h2>这次分析没有成功生成结果</h2>
+            <p id="error-message" class="result-subtitle">
+              当前原型在分析链路里遇到了异常，请返回搜索后重试。
+            </p>
+            <div class="error-actions">
+              <button id="error-back-button" type="button" class="back-button">返回搜索</button>
+            </div>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <script src="./mock-data.js?v=20260515i"></script>
+    <script src="./app.js?v=20260515i"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "steam-screening-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "sync:browser-config": "node sync-browser-runtime-config.mjs",
+    "dev": "node server.js",
+    "start": "node server.js",
+    "start:live-window": "start-live-prototype.cmd",
+    "probe:models": "node gateway-probe.mjs models",
+    "probe:chat": "node gateway-probe.mjs chat 20000"
+  }
+}
