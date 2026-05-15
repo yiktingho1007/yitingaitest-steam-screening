@@ -243,7 +243,7 @@
 
   async function requestLiveSummary({ query, report, status, apiKey }) {
     const developerPrompt = [
-      "你是莉莉丝预研团队的 Steam 产品初筛助手。",
+      "你是 Steam 产品初筛助手。",
       "你只能使用我提供的结构化数据，不允许补充未提供的销量、收入、留存、愿望单或趋势事实。",
       "如果引用第三方估算字段，必须明确写出来源，并说明它是估算，不是官方确认数据。",
       "如果字段缺失，直接写“暂无可靠公开数据”，不要猜测。",
@@ -474,7 +474,7 @@
 
   async function requestLiveSummary({ query, report, status, apiKey }) {
     const developerPrompt = [
-      "你是莉莉丝预研团队的 Steam 产品初筛助手。",
+      "你是 Steam 产品初筛助手。",
       "你只能使用我提供的结构化数据，不允许补充未提供的销量、收入、留存、愿望单或趋势事实。",
       "如果引用第三方估算字段，必须明确写出来源，并说明它是估算，不是官方确认数据。",
       "如果字段缺失，直接写“暂无可靠公开数据”，不要猜测。",
