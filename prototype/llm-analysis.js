@@ -375,6 +375,7 @@ function buildPromptPayload(query, report) {
       ]
     },
     target_game: pickPromptGame(report.target_game),
+    gameplay_profile: report.gameplay_profile || null,
     competitor_games: Array.isArray(report.competitor_games)
       ? report.competitor_games.map((game) => pickPromptGame(game))
       : [],

@@ -72,9 +72,11 @@ export async function buildLiveSteamReport({ query, appid, resolvedName }) {
   const targetBundle = await fetchGameBundle(appid);
   const resolvedAppId = Number(appid);
   const targetGame = buildGameFromBundle(targetBundle, fetchedAt);
+  const gameplayProfile = buildGameplayProfile(targetBundle);
   const competitorSelection = await selectCompetitors({
     targetAppId: resolvedAppId,
-    targetBundle
+    targetBundle,
+    gameplayProfile
   });
   const warnings = ["当前页面已切到真实公开数据拉取，结构化字段不再来自 mock。"];
 
@@ -103,6 +105,7 @@ export async function buildLiveSteamReport({ query, appid, resolvedName }) {
       failed_sources: []
     },
     target_game: targetGame,
+    gameplay_profile: gameplayProfile,
     comparison_frame: competitorSelection.comparisonFrame,
     competitor_candidates: competitorSelection.candidates,
     competitor_games: competitorSelection.games,
@@ -123,6 +126,7 @@ async function buildResolvedCandidateStub(query, suggestion) {
   const appid = Number(suggestion.appid);
   const bundle = await fetchGameBundle(appid, { lightweight: true });
   const targetGame = buildGameFromBundle(bundle, fetchedAt);
+  const gameplayProfile = buildGameplayProfile(bundle);
 
   return {
     id: `live-candidate-${appid}`,
@@ -145,6 +149,7 @@ async function buildResolvedCandidateStub(query, suggestion) {
       failed_sources: []
     },
     target_game: targetGame,
+    gameplay_profile: gameplayProfile,
     comparison_frame: null,
     competitor_candidates: [],
     competitor_games: [],
@@ -160,13 +165,14 @@ async function buildResolvedCandidateStub(query, suggestion) {
   };
 }
 
-async function selectCompetitors({ targetAppId, targetBundle }) {
+async function selectCompetitors({ targetAppId, targetBundle, gameplayProfile }) {
   const seed = await resolveCompetitorSeed({ targetAppId, targetBundle });
   const targetTags = seed.tags;
 
   return selectCompetitorsByFrame({
     targetAppId,
     targetBundle,
+    gameplayProfile,
     seed,
     targetTags
   });
@@ -289,14 +295,17 @@ async function selectCompetitors({ targetAppId, targetBundle }) {
   };
 }
 
-async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targetTags }) {
+async function selectCompetitorsByFrame({ targetAppId, targetBundle, gameplayProfile, seed, targetTags }) {
   const targetOwners = parseOwnerRange(targetBundle.spy?.owners);
   const targetPrice = normalizeSteamSpyPrice(targetBundle.spy?.price);
   const targetReviewCount = Number(targetBundle.spy?.positive || 0) + Number(targetBundle.spy?.negative || 0);
   const targetCcu = Number(targetBundle.spy?.ccu || 0);
   const targetMeta = buildBundleMeta(targetBundle);
   const targetSignals = getAllBundleSignals(targetBundle);
+  const effectiveGameplayProfile = gameplayProfile || buildGameplayProfile(targetBundle);
   const trackReferenceBundles = await findTrackReferenceBundlesForCompetitors(targetAppId, targetBundle);
+  const gameplayReferenceBundles = await findGameplayReferenceBundlesForCompetitors(targetAppId, targetBundle, effectiveGameplayProfile);
+  const referenceBundles = mergeReferenceBundles(trackReferenceBundles, gameplayReferenceBundles);
   const comparisonFrame = buildComparisonFrame({
     targetBundle,
     targetTags,
@@ -306,8 +315,9 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targe
     targetCcu,
     targetMeta,
     targetSignals,
+    gameplayProfile: effectiveGameplayProfile,
     seed,
-    trackReferenceBundles
+    trackReferenceBundles: referenceBundles
   });
 
   if (!targetTags.length) {
@@ -353,7 +363,7 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targe
     }
   });
 
-  for (const reference of trackReferenceBundles) {
+  for (const reference of referenceBundles) {
     const existing = candidateMap.get(reference.appid) || {
       appid: reference.appid,
       name: reference.name,
@@ -378,7 +388,7 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targe
 
   const detailed = await Promise.all(
     preliminary.map(async (candidate) => {
-      const knownReference = trackReferenceBundles.find((item) => item.appid === candidate.appid);
+      const knownReference = referenceBundles.find((item) => item.appid === candidate.appid);
       const spy = knownReference?.bundle?.spy || await fetchSteamSpyAppDetails(candidate.appid);
       const evidence = buildCompetitorEvidence({
         targetTags,
@@ -427,7 +437,7 @@ async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targe
 
   const games = await Promise.all(
     selected.map(async (item) => {
-      const knownReference = trackReferenceBundles.find((reference) => reference.appid === item.appid);
+      const knownReference = referenceBundles.find((reference) => reference.appid === item.appid);
       const bundle = knownReference?.bundle || await fetchGameBundle(item.appid, { steamSpyOverride: item.spy });
       return buildGameFromBundle(bundle, new Date().toISOString());
     })
@@ -683,6 +693,7 @@ function buildComparisonFrame({
   targetCcu,
   targetMeta,
   targetSignals,
+  gameplayProfile,
   seed,
   trackReferenceBundles
 }) {
@@ -746,6 +757,7 @@ function buildComparisonFrame({
     active_frame_types: uniqueStrings(frameTypes),
     frame_summary_hint: buildFrameSummaryHint(roles),
     frame_axes_hint: buildFrameAxesHint(roles),
+    gameplay_profile: gameplayProfile || null,
     roles,
     seed_reference_name: seed.referenceName || "",
     seed_reference_type: seed.referenceType || "",
@@ -1393,6 +1405,195 @@ function getAllBundleSignals(bundle) {
     ...splitCommaList(spy.languages),
     store.short_description || ""
   ]);
+}
+
+function buildGameplayProfile(bundle) {
+  const store = bundle.store || {};
+  const signals = getAllBundleSignals(bundle);
+  const signalText = signals.join(" ").toLowerCase();
+  const summaryText = stripHtml(store.short_description || store.detailed_description || "");
+
+  const playModes = [];
+  const activityLoops = [];
+  const scenarioKeywords = [];
+
+  if (/singleplayer|single-player/.test(signalText)) {
+    playModes.push("singleplayer");
+  }
+  if (/multiplayer|online co-?op|local co-?op|shared\/split screen|coop|co-op/.test(signalText)) {
+    playModes.push("multiplayer_coop");
+  }
+  if (/party|family|chaotic|funny|comedy/.test(signalText)) {
+    playModes.push("party");
+  }
+  if (/simulation|simulator|management|tycoon|building/.test(signalText)) {
+    activityLoops.push("management_sim");
+  }
+  if (/cooking|kitchen|restaurant|food/.test(signalText)) {
+    activityLoops.push("cooking_coordination");
+    scenarioKeywords.push("cooking");
+  }
+  if (/shop|store|supermarket|mall|retail/.test(signalText)) {
+    activityLoops.push("store_management");
+    scenarioKeywords.push("store");
+  }
+  if (/automation|factory|crafting|survival/.test(signalText)) {
+    activityLoops.push("system_driven_progression");
+  }
+  if (/roguelike|roguelite|deckbuilder|card battler/.test(signalText)) {
+    activityLoops.push("run_based_builds");
+  }
+  if (/stealth|shooter|fps|tactical/.test(signalText)) {
+    activityLoops.push("combat_execution");
+  }
+
+  const referenceQueries = buildGameplayReferenceSearchTerms({
+    title: store.name || bundle.spy?.name || "",
+    signalText,
+    summaryText,
+    playModes,
+    activityLoops,
+    scenarioKeywords
+  });
+
+  return {
+    short_summary: summaryText || buildSubtitle(getTopSpecificTags(bundle.spy?.tags || {}).slice(0, 5), store.genres),
+    play_modes: uniqueStrings(playModes),
+    activity_loops: uniqueStrings(activityLoops),
+    scenario_keywords: uniqueStrings(scenarioKeywords),
+    reference_queries: referenceQueries
+  };
+}
+
+function buildGameplayReferenceSearchTerms({ title, signalText, summaryText, playModes, activityLoops, scenarioKeywords }) {
+  const terms = [];
+  const lowerTitle = String(title || "").toLowerCase();
+
+  if (playModes.includes("party") && activityLoops.includes("cooking_coordination")) {
+    terms.push("Overcooked 2", "PlateUp!", "Moving Out");
+  }
+  if (activityLoops.includes("store_management")) {
+    terms.push("Supermarket Simulator", "Shop Titans", "Gas Station Simulator");
+  }
+  if (activityLoops.includes("management_sim") && /director|boss|manager|management|tycoon/.test(`${lowerTitle} ${summaryText.toLowerCase()}`)) {
+    terms.push("Game Dev Tycoon", "Big Ambitions", "Startup Company");
+  }
+  if (playModes.includes("party") && activityLoops.includes("management_sim")) {
+    terms.push("Tools Up!", "Moving Out", "PlateUp!");
+  }
+  if (activityLoops.includes("run_based_builds")) {
+    terms.push("Balatro", "Slay the Spire", "Hades");
+  }
+  if (activityLoops.includes("combat_execution") && /tactical|breach|raid/.test(signalText)) {
+    terms.push("Ready or Not", "Rainbow Six Siege", "Door Kickers 2");
+  }
+
+  if (!terms.length) {
+    if (scenarioKeywords.includes("cooking")) {
+      terms.push("Overcooked 2", "PlateUp!");
+    } else if (scenarioKeywords.includes("store")) {
+      terms.push("Supermarket Simulator", "Gas Station Simulator");
+    }
+  }
+
+  return uniqueStrings(terms).slice(0, 4);
+}
+
+async function findGameplayReferenceBundlesForCompetitors(targetAppId, targetBundle, gameplayProfile) {
+  const terms = gameplayProfile?.reference_queries || [];
+  const bundles = [];
+  const seen = new Set();
+
+  for (const term of terms) {
+    const suggestions = await fetchSearchSuggestions(term);
+
+    for (const suggestion of suggestions.slice(0, 3)) {
+      const numericAppId = Number(suggestion.appid);
+      if (numericAppId === Number(targetAppId) || seen.has(numericAppId)) {
+        continue;
+      }
+
+      const bundle = await fetchGameBundle(numericAppId, { lightweight: true });
+      if (!isValidGameplayReferenceBundle(bundle, targetBundle, gameplayProfile, term)) {
+        continue;
+      }
+
+      seen.add(numericAppId);
+      bundles.push({
+        appid: numericAppId,
+        name: bundle.store?.name || bundle.spy?.name || suggestion.name,
+        bundle
+      });
+
+      if (bundles.length >= 3) {
+        return bundles;
+      }
+    }
+  }
+
+  return bundles;
+}
+
+function isValidGameplayReferenceBundle(candidateBundle, targetBundle, gameplayProfile, referenceTerm = "") {
+  const candidateSignals = getAllBundleSignals(candidateBundle).join(" ").toLowerCase();
+  const targetSignals = getAllBundleSignals(targetBundle).join(" ").toLowerCase();
+  const termText = normalizeText(referenceTerm);
+  const candidateName = normalizeText(candidateBundle.store?.name || candidateBundle.spy?.name || "");
+
+  if (termText && !candidateName.includes(termText)) {
+    return false;
+  }
+
+  const sharedModes = (gameplayProfile?.play_modes || []).filter((mode) => {
+    if (mode === "party") {
+      return /party|family|chaotic|funny|comedy/.test(candidateSignals);
+    }
+    if (mode === "multiplayer_coop") {
+      return /multiplayer|co-?op|shared\/split screen/.test(candidateSignals);
+    }
+    if (mode === "singleplayer") {
+      return /singleplayer|single-player/.test(candidateSignals);
+    }
+    return false;
+  });
+
+  const sharedLoops = (gameplayProfile?.activity_loops || []).filter((loop) => {
+    if (loop === "cooking_coordination") {
+      return /cooking|kitchen|restaurant|food/.test(candidateSignals);
+    }
+    if (loop === "store_management") {
+      return /shop|store|supermarket|mall|retail/.test(candidateSignals);
+    }
+    if (loop === "management_sim") {
+      return /simulation|simulator|management|tycoon|building/.test(candidateSignals);
+    }
+    if (loop === "run_based_builds") {
+      return /roguelike|roguelite|deckbuilder|card battler/.test(candidateSignals);
+    }
+    if (loop === "combat_execution") {
+      return /stealth|shooter|fps|tactical/.test(candidateSignals);
+    }
+    return false;
+  });
+
+  return sharedModes.length > 0 || sharedLoops.length > 0 || candidateSignals === targetSignals;
+}
+
+function mergeReferenceBundles(...groups) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const group of groups) {
+    for (const item of group || []) {
+      if (!item?.appid || seen.has(item.appid)) {
+        continue;
+      }
+      seen.add(item.appid);
+      merged.push(item);
+    }
+  }
+
+  return merged;
 }
 
 function uniqueStrings(values) {
