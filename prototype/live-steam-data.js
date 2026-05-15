@@ -324,6 +324,18 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
     };
   }
 
+  const trackReference = await findTrackReferenceBundleForCompetitors(targetAppId, targetBundle);
+  const trackReferenceTags = trackReference ? getTopSpecificTags(trackReference.bundle.spy?.tags || {}) : [];
+
+  if (trackReferenceTags.length) {
+    return {
+      tags: trackReferenceTags,
+      preferredAppIds: [trackReference.appid],
+      referenceName: trackReference.name,
+      warnings: [`当前产品缺少足够具体的直连标签，竞品改用玩法赛道参考作《${trackReference.name}》建立比较坐标。`]
+    };
+  }
+
   const fallbackGenres = getFallbackGenreTags(targetBundle);
 
   if (fallbackGenres.length) {
@@ -814,6 +826,33 @@ async function findReferenceBundleForCompetitors(targetAppId, targetBundle) {
   return null;
 }
 
+async function findTrackReferenceBundleForCompetitors(targetAppId, targetBundle) {
+  const trackTerms = buildTrackReferenceSearchTerms(targetBundle);
+
+  for (const term of trackTerms) {
+    const suggestions = await fetchSearchSuggestions(term);
+
+    for (const suggestion of suggestions.slice(0, 5)) {
+      if (Number(suggestion.appid) === Number(targetAppId)) {
+        continue;
+      }
+
+      const bundle = await fetchGameBundle(suggestion.appid);
+      if (!isValidTrackReferenceBundle(bundle, targetBundle, term)) {
+        continue;
+      }
+
+      return {
+        appid: Number(suggestion.appid),
+        name: bundle.store?.name || bundle.spy?.name || suggestion.name,
+        bundle
+      };
+    }
+  }
+
+  return null;
+}
+
 function buildAliases(name, appid) {
   return normalizeStringArray([name, String(appid)]);
 }
@@ -837,6 +876,65 @@ function buildReferenceSearchTerms(name) {
   }
 
   return normalizeStringArray(terms);
+}
+
+function buildTrackReferenceSearchTerms(targetBundle) {
+  const tags = getAllBundleSignals(targetBundle);
+  const hasPartyCoopSignal =
+    tags.some((value) => /party|co-?op|coop|local co-?op|shared\/split screen|multiplayer/i.test(value)) &&
+    tags.some((value) => /funny|comedy|family|casual|cooking|chaotic|arcade/i.test(value));
+
+  const hasCookingSignal = tags.some((value) => /cooking|kitchen|restaurant|food/i.test(value));
+
+  if (hasPartyCoopSignal && hasCookingSignal) {
+    return ["Overcooked", "Overcooked 2", "PlateUp!"];
+  }
+
+  if (hasPartyCoopSignal) {
+    return ["Overcooked 2", "Moving Out", "PlateUp!"];
+  }
+
+  return [];
+}
+
+function isValidTrackReferenceBundle(candidateBundle, targetBundle, trackTerm = "") {
+  const candidateStore = candidateBundle.store || {};
+
+  if (String(candidateStore.type || "").toLowerCase() !== "game") {
+    return false;
+  }
+
+  const candidateSignals = getAllBundleSignals(candidateBundle);
+  const targetSignals = getAllBundleSignals(targetBundle);
+  const normalizedTrackTerm = normalizeText(trackTerm);
+  const candidateName = normalizeText(candidateStore.name || candidateBundle.spy?.name || "");
+
+  if (normalizedTrackTerm && !candidateName.includes(normalizedTrackTerm)) {
+    return false;
+  }
+
+  const partyCoopMatch =
+    candidateSignals.some((value) => /party|co-?op|coop|local co-?op|shared\/split screen|multiplayer/i.test(value)) &&
+    targetSignals.some((value) => /party|co-?op|coop|local co-?op|shared\/split screen|multiplayer/i.test(value));
+
+  return partyCoopMatch;
+}
+
+function getAllBundleSignals(bundle) {
+  const store = bundle.store || {};
+  const spy = bundle.spy || {};
+  const storeGenres = Array.isArray(store.genres) ? store.genres.map((item) => item?.description) : [];
+  const storeCategories = Array.isArray(store.categories) ? store.categories.map((item) => item?.description) : [];
+  const topTags = Object.keys(spy.tags || {});
+
+  return normalizeStringArray([
+    ...storeGenres,
+    ...storeCategories,
+    ...topTags,
+    ...splitCommaList(spy.genre),
+    ...splitCommaList(spy.languages),
+    store.short_description || ""
+  ]);
 }
 
 function isValidReferenceBundle(candidateBundle, targetBundle) {
