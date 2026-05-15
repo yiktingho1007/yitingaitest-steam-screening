@@ -409,6 +409,7 @@
       competitor_games: Array.isArray(report.competitor_games)
         ? report.competitor_games.map((game) => pickPromptGame(game))
         : [],
+      comparison_frame: report.comparison_frame || null,
       competitor_candidates: Array.isArray(report.competitor_candidates)
         ? report.competitor_candidates
             .filter((candidate) => candidate.is_selected)
@@ -418,7 +419,8 @@
               selection_reason: candidate.selection_reason,
               comparison_basis: candidate.comparison_basis || [],
               coordinate_role_hint: candidate.coordinate_role_hint || "",
-              evidence_strength: candidate.evidence_strength || "unknown"
+              evidence_strength: candidate.evidence_strength || "unknown",
+              role_matches: candidate.role_matches || []
             }))
         : [],
       source_summary: report.source_summary || {},
@@ -639,7 +641,7 @@
       llm_configured: status.configured,
       llm_model: status.model,
       analyzed_at: now,
-      prompt_version: "steam_screening_v1",
+      prompt_version: "steam_screening_v2",
       delivery_mode: status.channel
     };
 

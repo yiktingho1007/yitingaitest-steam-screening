@@ -103,6 +103,7 @@ export async function buildLiveSteamReport({ query, appid, resolvedName }) {
       failed_sources: []
     },
     target_game: targetGame,
+    comparison_frame: competitorSelection.comparisonFrame,
     competitor_candidates: competitorSelection.candidates,
     competitor_games: competitorSelection.games,
     llm_summary: buildPlaceholderSummary(targetGame),
@@ -144,6 +145,7 @@ async function buildResolvedCandidateStub(query, suggestion) {
       failed_sources: []
     },
     target_game: targetGame,
+    comparison_frame: null,
     competitor_candidates: [],
     competitor_games: [],
     llm_summary: buildPlaceholderSummary(targetGame),
@@ -161,6 +163,13 @@ async function buildResolvedCandidateStub(query, suggestion) {
 async function selectCompetitors({ targetAppId, targetBundle }) {
   const seed = await resolveCompetitorSeed({ targetAppId, targetBundle });
   const targetTags = seed.tags;
+
+  return selectCompetitorsByFrame({
+    targetAppId,
+    targetBundle,
+    seed,
+    targetTags
+  });
 
   if (!targetTags.length) {
     return {
@@ -280,6 +289,181 @@ async function selectCompetitors({ targetAppId, targetBundle }) {
   };
 }
 
+async function selectCompetitorsByFrame({ targetAppId, targetBundle, seed, targetTags }) {
+  const targetOwners = parseOwnerRange(targetBundle.spy?.owners);
+  const targetPrice = normalizeSteamSpyPrice(targetBundle.spy?.price);
+  const targetReviewCount = Number(targetBundle.spy?.positive || 0) + Number(targetBundle.spy?.negative || 0);
+  const targetCcu = Number(targetBundle.spy?.ccu || 0);
+  const targetMeta = buildBundleMeta(targetBundle);
+  const targetSignals = getAllBundleSignals(targetBundle);
+  const trackReferenceBundles = await findTrackReferenceBundlesForCompetitors(targetAppId, targetBundle);
+  const comparisonFrame = buildComparisonFrame({
+    targetBundle,
+    targetTags,
+    targetOwners,
+    targetPrice,
+    targetReviewCount,
+    targetCcu,
+    targetMeta,
+    targetSignals,
+    seed,
+    trackReferenceBundles
+  });
+
+  if (!targetTags.length) {
+    return {
+      comparisonFrame,
+      candidates: [],
+      games: [],
+      warnings: seed.warnings || ["当前产品缺少可用标签，暂时无法自动挑选竞品。"]
+    };
+  }
+
+  const preferredAppIds = new Set(seed.preferredAppIds || []);
+  const tagResults = await Promise.all(
+    targetTags.slice(0, 2).map((tag) => fetchSteamSpyTag(tag))
+  );
+
+  const candidateMap = new Map();
+  tagResults.forEach((payload, index) => {
+    const tag = targetTags[index];
+    const games = Object.values(payload || {})
+      .filter(Boolean)
+      .filter((item) => Number(item.appid) !== targetAppId)
+      .sort((a, b) => (b.positive + b.negative) - (a.positive + a.negative))
+      .slice(0, 80);
+
+    for (const item of games) {
+      const appid = Number(item.appid);
+      const existing = candidateMap.get(appid) || {
+        appid,
+        name: item.name,
+        tagHits: [],
+        tagScore: 0,
+        positive: Number(item.positive || 0),
+        negative: Number(item.negative || 0),
+        owners: item.owners || "",
+        ccu: Number(item.ccu || 0),
+        trackReference: false
+      };
+
+      existing.tagHits.push(tag);
+      existing.tagScore += 100 - existing.tagHits.length * 10;
+      candidateMap.set(appid, existing);
+    }
+  });
+
+  for (const reference of trackReferenceBundles) {
+    const existing = candidateMap.get(reference.appid) || {
+      appid: reference.appid,
+      name: reference.name,
+      tagHits: [],
+      tagScore: 0,
+      positive: Number(reference.bundle.spy?.positive || 0),
+      negative: Number(reference.bundle.spy?.negative || 0),
+      owners: reference.bundle.spy?.owners || "",
+      ccu: Number(reference.bundle.spy?.ccu || 0),
+      trackReference: true
+    };
+
+    existing.tagScore += 65;
+    existing.trackReference = true;
+    candidateMap.set(reference.appid, existing);
+  }
+
+  const preliminary = [...candidateMap.values()]
+    .filter((item) => item.tagHits.length > 0 || item.trackReference)
+    .sort((a, b) => b.tagScore - a.tagScore)
+    .slice(0, 18);
+
+  const detailed = await Promise.all(
+    preliminary.map(async (candidate) => {
+      const knownReference = trackReferenceBundles.find((item) => item.appid === candidate.appid);
+      const spy = knownReference?.bundle?.spy || await fetchSteamSpyAppDetails(candidate.appid);
+      const evidence = buildCompetitorEvidence({
+        targetTags,
+        targetMeta,
+        targetOwners,
+        targetPrice,
+        targetReviewCount,
+        targetCcu,
+        candidate,
+        spy
+      });
+      evidence.role_matches = getRoleMatches({
+        comparisonFrame,
+        sameSeries: evidence.same_series,
+        sameDeveloper: evidence.same_developer,
+        samePublisher: evidence.same_publisher,
+        sharedTags: evidence.shared_tags,
+        priceSimilarityRatio: evidence.price_similarity_ratio,
+        scaleSimilarityRatio: evidence.scale_similarity_ratio,
+        candidateName: candidate.name,
+        candidateTags: getTopSpecificTags(spy?.tags || {})
+      });
+      if (evidence.role_matches.length) {
+        evidence.coordinate_role_hint = evidence.role_matches[0];
+      }
+      const score = scoreCompetitorV2({
+        candidate,
+        evidence
+      }) + (preferredAppIds.has(candidate.appid) ? 120 : 0) + (candidate.trackReference ? 45 : 0);
+
+      return {
+        ...candidate,
+        spy,
+        evidence,
+        score,
+        selection_reason: buildSelectionReasonV2(evidence, preferredAppIds.has(candidate.appid), seed.referenceName)
+      };
+    })
+  );
+
+  const selected = selectCompetitorsForFrame({
+    detailed,
+    comparisonFrame,
+    preferredAppIds
+  });
+
+  const games = await Promise.all(
+    selected.map(async (item) => {
+      const knownReference = trackReferenceBundles.find((reference) => reference.appid === item.appid);
+      const bundle = knownReference?.bundle || await fetchGameBundle(item.appid, { steamSpyOverride: item.spy });
+      return buildGameFromBundle(bundle, new Date().toISOString());
+    })
+  );
+
+  const selectedIds = new Set(selected.map((item) => item.appid));
+  const candidates = detailed
+    .filter((item) => item.evidence.is_comparable || preferredAppIds.has(item.appid) || item.trackReference)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((item) => ({
+      app_id: item.appid,
+      name: item.name,
+      total_score: Number(item.score.toFixed(1)),
+      selection_reason: item.selection_reason,
+      comparison_basis: item.evidence.comparison_basis,
+      coordinate_role_hint: item.evidence.coordinate_role_hint,
+      evidence_strength: item.evidence.evidence_strength,
+      role_matches: item.evidence.role_matches || [],
+      is_selected: selectedIds.has(item.appid)
+    }));
+
+  return {
+    comparisonFrame: hydrateComparisonFrame({
+      comparisonFrame,
+      selected
+    }),
+    candidates,
+    games,
+    warnings: [
+      ...(seed.warnings || []),
+      ...(selected.length < 2 ? ["当前自动竞品坐标证据不足，系统已优先按坐标角色筛样，本轮缺少足够强的参照物。"] : [])
+    ]
+  };
+}
+
 function buildSelectionReason(targetTags, spy, targetPrice, candidatePrice, isPreferredReference = false, referenceName = "") {
   const overlap = getTopSpecificTags(spy?.tags || {})
     .filter((tag) => targetTags.includes(tag))
@@ -308,6 +492,7 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
       tags: directTags,
       preferredAppIds: [],
       referenceName: "",
+      referenceType: "direct_tags",
       warnings: []
     };
   }
@@ -320,6 +505,7 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
       tags: referenceTags,
       preferredAppIds: [reference.appid],
       referenceName: reference.name,
+      referenceType: "series",
       warnings: [`当前产品自身缺少 SteamSpy 标签，竞品改用系列参考作《${reference.name}》的标签进行筛选。`]
     };
   }
@@ -332,6 +518,7 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
       tags: trackReferenceTags,
       preferredAppIds: [trackReference.appid],
       referenceName: trackReference.name,
+      referenceType: "track_reference",
       warnings: [`当前产品缺少足够具体的直连标签，竞品改用玩法赛道参考作《${trackReference.name}》建立比较坐标。`]
     };
   }
@@ -347,6 +534,7 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
       tags: fallbackGenres,
       preferredAppIds: reference ? [reference.appid] : [],
       referenceName: reference?.name || "",
+      referenceType: reference ? "reference_series" : "fallback_genre",
       warnings
     };
   }
@@ -355,6 +543,7 @@ async function resolveCompetitorSeed({ targetAppId, targetBundle }) {
     tags: [],
     preferredAppIds: [],
     referenceName: "",
+    referenceType: "none",
     warnings: ["当前产品缺少可用标签或类型信息，暂时无法自动挑选竞品。"]
   };
 }
@@ -484,6 +673,240 @@ function buildComparisonBasis({
   }
 
   return basis;
+}
+
+function buildComparisonFrame({
+  targetTags,
+  targetOwners,
+  targetPrice,
+  targetReviewCount,
+  targetCcu,
+  targetMeta,
+  targetSignals,
+  seed,
+  trackReferenceBundles
+}) {
+  const roles = [];
+  const frameTypes = [];
+  const signalText = targetSignals.join(" ").toLowerCase();
+  const hasFranchiseSeed = seed.referenceName && (seed.referenceType === "series" || seed.referenceType === "reference_series");
+  const hasTrackSignal =
+    targetTags.length >= 2 ||
+    /party|co-?op|cooking|deckbuild|roguelike|survival|souls|extraction|city builder|factory|automation|visual novel|dating sim/.test(signalText) ||
+    trackReferenceBundles.length > 0;
+  const hasLineageSignal = Boolean(targetMeta.developers.length || targetMeta.publishers.length);
+  const hasScaleSignal = Boolean(targetOwners.midpoint || targetPrice || targetReviewCount || targetCcu);
+
+  if (hasFranchiseSeed) {
+    frameTypes.push("franchise");
+    roles.push({
+      key: "franchise_anchor",
+      label: "系列基准",
+      required: true,
+      selection_rule: "优先选择同系列、同命名干线或明确承接前作认知的样本。",
+      summary_hint: "回答这款产品相对前作是延续、放大还是偏移。"
+    });
+  }
+
+  if (hasTrackSignal) {
+    frameTypes.push("track");
+    roles.push({
+      key: "track_anchor",
+      label: "玩法赛道参照",
+      required: true,
+      selection_rule: "选择玩家会自然联想到的玩法赛道样本，要求有多信号重合，而不是单标签重合。",
+      summary_hint: "回答它放进同类玩法赛道后，大概站在什么位置。"
+    });
+  }
+
+  if (hasLineageSignal) {
+    frameTypes.push("lineage");
+    roles.push({
+      key: "lineage_anchor",
+      label: "团队谱系参照",
+      required: false,
+      selection_rule: "如果同开发或同发行成立，可作为创作延续性参照。",
+      summary_hint: "回答团队过去的产品经验是否会影响这次预期。"
+    });
+  }
+
+  if (hasScaleSignal) {
+    frameTypes.push("scale");
+    roles.push({
+      key: "scale_peer",
+      label: "同体量平行样本",
+      required: false,
+      selection_rule: "优先选择价格带、评论量级或拥有量级接近的样本。",
+      summary_hint: "回答它在相近商业体量样本里处于什么档位。"
+    });
+  }
+
+  return {
+    version: "comparison_frame_v2",
+    active_frame_types: uniqueStrings(frameTypes),
+    frame_summary_hint: buildFrameSummaryHint(roles),
+    frame_axes_hint: buildFrameAxesHint(roles),
+    roles,
+    seed_reference_name: seed.referenceName || "",
+    seed_reference_type: seed.referenceType || "",
+    track_reference_names: trackReferenceBundles.map((item) => item.name),
+    evidence_sources: uniqueStrings([
+      targetTags.length ? "steamspy_tag_cluster" : "",
+      trackReferenceBundles.length ? "store_signal_track_reference" : "",
+      hasLineageSignal ? "team_lineage_signal" : "",
+      hasScaleSignal ? "scale_metrics_signal" : ""
+    ])
+  };
+}
+
+function buildFrameSummaryHint(roles) {
+  if (!roles.length) {
+    return "当前没有稳定坐标系，只能做基础描述。";
+  }
+
+  return `先按 ${roles.map((role) => role.label).join(" / ")} 建坐标，再决定哪些产品值得放进比较。`;
+}
+
+function buildFrameAxesHint(roles) {
+  const hints = [];
+
+  for (const role of roles) {
+    if (role.key === "franchise_anchor") {
+      hints.push("续作相对前作放大量");
+    } else if (role.key === "track_anchor") {
+      hints.push("放入玩法赛道后的相对位置");
+    } else if (role.key === "lineage_anchor") {
+      hints.push("团队谱系延续与偏移");
+    } else if (role.key === "scale_peer") {
+      hints.push("同体量样本中的商业级别");
+    }
+  }
+
+  return uniqueStrings(hints).slice(0, 4);
+}
+
+function getRoleMatches({
+  comparisonFrame,
+  sameSeries,
+  sameDeveloper,
+  samePublisher,
+  sharedTags,
+  priceSimilarityRatio,
+  scaleSimilarityRatio,
+  candidateName,
+  candidateTags
+}) {
+  if (!comparisonFrame?.roles?.length) {
+    return [];
+  }
+
+  const candidateText = `${candidateName || ""} ${candidateTags.join(" ")}`.toLowerCase();
+  const matches = [];
+
+  for (const role of comparisonFrame.roles) {
+    if (role.key === "franchise_anchor" && sameSeries) {
+      matches.push("系列前作/同系列基准");
+    }
+    if (role.key === "lineage_anchor" && (sameDeveloper || samePublisher)) {
+      matches.push("团队谱系参照");
+    }
+    if (role.key === "track_anchor" && (
+      sharedTags.length >= 2 ||
+      comparisonFrame.track_reference_names.some((name) => candidateText.includes(String(name || "").toLowerCase()))
+    )) {
+      matches.push("同赛道外部样本");
+    }
+    if (role.key === "scale_peer" && (priceSimilarityRatio >= 0.55 || scaleSimilarityRatio >= 0.5)) {
+      matches.push("同体量平行样本");
+    }
+  }
+
+  return uniqueStrings(matches);
+}
+
+function selectCompetitorsForFrame({ detailed, comparisonFrame, preferredAppIds }) {
+  const selected = [];
+  const usedIds = new Set();
+  const pool = detailed
+    .filter((item) => item.evidence.is_comparable || preferredAppIds.has(item.appid) || item.trackReference)
+    .sort((a, b) => b.score - a.score);
+
+  for (const role of comparisonFrame.roles || []) {
+    const bestMatch = pool
+      .filter((item) => !usedIds.has(item.appid))
+      .filter((item) => matchesRole(item, role.key, preferredAppIds))
+      .sort((a, b) => scoreCandidateForRole(b, role.key, preferredAppIds) - scoreCandidateForRole(a, role.key, preferredAppIds))[0];
+
+    if (bestMatch) {
+      selected.push(bestMatch);
+      usedIds.add(bestMatch.appid);
+    }
+  }
+
+  for (const item of pool) {
+    if (selected.length >= 2) {
+      break;
+    }
+    if (usedIds.has(item.appid)) {
+      continue;
+    }
+    selected.push(item);
+    usedIds.add(item.appid);
+  }
+
+  return selected.slice(0, 2);
+}
+
+function matchesRole(item, roleKey, preferredAppIds) {
+  if (roleKey === "franchise_anchor") {
+    return item.evidence.same_series || preferredAppIds.has(item.appid);
+  }
+  if (roleKey === "lineage_anchor") {
+    return item.evidence.same_developer || item.evidence.same_publisher;
+  }
+  if (roleKey === "track_anchor") {
+    return (item.evidence.role_matches || []).includes("同赛道外部样本");
+  }
+  if (roleKey === "scale_peer") {
+    return item.evidence.price_similarity_ratio >= 0.55 || item.evidence.scale_similarity_ratio >= 0.5;
+  }
+  return false;
+}
+
+function scoreCandidateForRole(item, roleKey, preferredAppIds) {
+  if (roleKey === "franchise_anchor") {
+    return item.score + (item.evidence.same_series ? 120 : 0) + (preferredAppIds.has(item.appid) ? 80 : 0);
+  }
+  if (roleKey === "lineage_anchor") {
+    return item.score + (item.evidence.same_developer ? 70 : 0) + (item.evidence.same_publisher ? 35 : 0);
+  }
+  if (roleKey === "track_anchor") {
+    return item.score + item.evidence.shared_tags.length * 20 + item.evidence.scale_similarity_ratio * 18;
+  }
+  if (roleKey === "scale_peer") {
+    return item.score + item.evidence.scale_similarity_ratio * 45 + item.evidence.price_similarity_ratio * 30;
+  }
+  return item.score;
+}
+
+function hydrateComparisonFrame({ comparisonFrame, selected }) {
+  if (!comparisonFrame) {
+    return null;
+  }
+
+  return {
+    ...comparisonFrame,
+    selected_role_samples: (comparisonFrame.roles || []).map((role) => {
+      const matched = selected.find((item) => matchesRole(item, role.key, new Set()));
+      return {
+        role_key: role.key,
+        role_label: role.label,
+        selected_app_id: matched?.appid || null,
+        selected_name: matched?.name || null
+      };
+    }),
+    selected_count: selected.length
+  };
 }
 
 function buildBundleMeta(bundle) {
@@ -851,6 +1274,36 @@ async function findTrackReferenceBundleForCompetitors(targetAppId, targetBundle)
   }
 
   return null;
+}
+
+async function findTrackReferenceBundlesForCompetitors(targetAppId, targetBundle) {
+  const trackTerms = buildTrackReferenceSearchTerms(targetBundle);
+  const bundles = [];
+  const seen = new Set();
+
+  for (const term of trackTerms) {
+    const suggestions = await fetchSearchSuggestions(term);
+
+    for (const suggestion of suggestions.slice(0, 5)) {
+      if (Number(suggestion.appid) === Number(targetAppId) || seen.has(Number(suggestion.appid))) {
+        continue;
+      }
+
+      const bundle = await fetchGameBundle(suggestion.appid);
+      if (!isValidTrackReferenceBundle(bundle, targetBundle, term)) {
+        continue;
+      }
+
+      seen.add(Number(suggestion.appid));
+      bundles.push({
+        appid: Number(suggestion.appid),
+        name: bundle.store?.name || bundle.spy?.name || suggestion.name,
+        bundle
+      });
+    }
+  }
+
+  return bundles;
 }
 
 function buildAliases(name, appid) {

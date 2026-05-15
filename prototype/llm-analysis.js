@@ -378,6 +378,7 @@ function buildPromptPayload(query, report) {
     competitor_games: Array.isArray(report.competitor_games)
       ? report.competitor_games.map((game) => pickPromptGame(game))
       : [],
+    comparison_frame: report.comparison_frame || null,
     competitor_candidates: Array.isArray(report.competitor_candidates)
       ? report.competitor_candidates
           .filter((candidate) => candidate.is_selected)
@@ -388,7 +389,8 @@ function buildPromptPayload(query, report) {
             selection_reason: candidate.selection_reason,
             comparison_basis: candidate.comparison_basis || [],
             coordinate_role_hint: candidate.coordinate_role_hint || "",
-            evidence_strength: candidate.evidence_strength || "unknown"
+            evidence_strength: candidate.evidence_strength || "unknown",
+            role_matches: candidate.role_matches || []
           }))
       : [],
     source_summary: report.source_summary || {},
@@ -561,7 +563,7 @@ function buildOutputReport({
     llm_configured: status.configured,
     llm_model: liveModel || status.model,
     analyzed_at: now,
-    prompt_version: "steam_screening_server_v2"
+    prompt_version: "steam_screening_server_v3"
   };
 
   if (llmError) {
