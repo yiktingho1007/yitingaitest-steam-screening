@@ -2,6 +2,7 @@ name = "yitingaitest-steam-screening"
 main = "cloudflare/worker.js"
 compatibility_date = "2026-05-15"
 workers_dev = true
+preview_urls = false
 
 [assets]
 directory = "./prototype"
