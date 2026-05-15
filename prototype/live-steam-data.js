@@ -1672,6 +1672,10 @@ function uniqueStrings(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+function cleanString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function isValidReferenceBundle(candidateBundle, targetBundle) {
   const candidateStore = candidateBundle.store || {};
   const targetStore = targetBundle.store || {};
