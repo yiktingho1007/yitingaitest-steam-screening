@@ -415,7 +415,10 @@
             .map((candidate) => ({
               name: candidate.name,
               total_score: candidate.total_score,
-              selection_reason: candidate.selection_reason
+              selection_reason: candidate.selection_reason,
+              comparison_basis: candidate.comparison_basis || [],
+              coordinate_role_hint: candidate.coordinate_role_hint || "",
+              evidence_strength: candidate.evidence_strength || "unknown"
             }))
         : [],
       source_summary: report.source_summary || {},
@@ -473,9 +476,11 @@
       "如果引用第三方估算字段，必须明确写出来源，并说明它是估算，不是官方确认数据。",
       "如果字段缺失，直接写“暂无可靠公开数据”，不要猜测。",
       "这次最重要的任务不是泛泛总结，而是做竞品参照物的精准分析。",
+      "先判断系统给出的竞品是否真的具备可比性，再输出结论；如果证据不足，可以明确指出当前坐标系不成立。",
       "你必须明确回答：为什么应该拿这两款竞品作为参照物，它们和目标产品的可比性具体在哪里。",
-      "不要只写“共享标签，所以适合比较”这种空话；每个竞品至少要写出两个具体的可比维度。",
-      "可比维度优先从这些信息里挑：共享标签、是否同系列或同开发团队、价格带、发售阶段、评论量级、当前在线、第三方拥有量估算、受众预期。",
+      "不要只写“共享标签，所以适合比较”这种空话；单一标签重合不能单独构成竞品结论，每个竞品至少要写出两个具体的可比维度。",
+      "可比维度优先从这些信息里挑：是否同系列、是否同开发/发行团队、多标签重合、价格带、发售阶段、评论量级、当前在线、第三方拥有量估算。",
+      "如果 comparison_basis 里出现 tag_only_weak_signal，说明这是弱证据候选，你应明确降权甚至否定它，而不是硬解释成合理竞品。",
       "如果某个竞品是系列前作或同系列参照，必须点明它为什么能回答“续作相对前作是否放大”的问题。",
       "如果某个竞品不是同系列，而是同赛道外部样本，必须点明它为什么能回答“放到更广的品类坐标里，这款产品站在什么位置”的问题。",
       "comparison_frame_summary 必须写成 2 到 3 句，明确说明这款游戏应该放在什么坐标系里看，而且要点名当前这两款竞品各自承担什么参照角色。",
@@ -494,7 +499,7 @@
       "comparison_axes 必须是 3 条短语数组，每条不超过 16 个字。",
       "competitor_rationales 必须与当前入选竞品一一对应。",
       "competitor_rationales 里的每个对象只包含 competitor_app_id、competitor_name、why_compare、coordinate_role 四个键。",
-      "why_compare 不要复述系统给出的 selection_reason，而是要把 selection_reason 当成线索，再结合实际字段把可比性讲具体。",
+      "why_compare 不要复述系统给出的 selection_reason，而是要把 selection_reason、comparison_basis、coordinate_role_hint 当成线索，再结合实际字段把可比性讲具体。",
       "如果系统给出的竞品里有同系列参照和外部赛道样本，comparison_frame_summary 必须把这两种参照角色区分开写。",
       "used_fields 只填写你实际引用过的字段名。",
       "used_estimate_sources 只填写你实际引用过的第三方估算来源，没有则返回空数组。",

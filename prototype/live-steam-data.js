@@ -211,35 +211,40 @@ async function selectCompetitors({ targetAppId, targetBundle }) {
 
   const targetOwners = parseOwnerRange(targetBundle.spy?.owners);
   const targetPrice = normalizeSteamSpyPrice(targetBundle.spy?.price);
+  const targetReviewCount = Number(targetBundle.spy?.positive || 0) + Number(targetBundle.spy?.negative || 0);
+  const targetCcu = Number(targetBundle.spy?.ccu || 0);
+  const targetMeta = buildBundleMeta(targetBundle);
 
   const detailed = await Promise.all(
     preliminary.map(async (candidate) => {
       const spy = await fetchSteamSpyAppDetails(candidate.appid);
-      const score = scoreCompetitor({
+      const evidence = buildCompetitorEvidence({
         targetTags,
+        targetMeta,
         targetOwners,
         targetPrice,
+        targetReviewCount,
+        targetCcu,
         candidate,
         spy
+      });
+      const score = scoreCompetitorV2({
+        candidate,
+        evidence
       }) + (preferredAppIds.has(candidate.appid) ? 120 : 0);
 
       return {
         ...candidate,
         spy,
+        evidence,
         score,
-        selection_reason: buildSelectionReason(
-          targetTags,
-          spy,
-          targetPrice,
-          normalizeSteamSpyPrice(spy.price),
-          preferredAppIds.has(candidate.appid),
-          seed.referenceName
-        )
+        selection_reason: buildSelectionReasonV2(evidence, preferredAppIds.has(candidate.appid), seed.referenceName)
       };
     })
   );
 
   const selected = detailed
+    .filter((item) => item.evidence.is_comparable || preferredAppIds.has(item.appid))
     .sort((a, b) => b.score - a.score)
     .slice(0, 2);
 
@@ -251,6 +256,7 @@ async function selectCompetitors({ targetAppId, targetBundle }) {
   );
 
   const candidates = detailed
+    .filter((item) => item.evidence.is_comparable || preferredAppIds.has(item.appid))
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
     .map((item, index) => ({
@@ -258,13 +264,19 @@ async function selectCompetitors({ targetAppId, targetBundle }) {
       name: item.name,
       total_score: Number(item.score.toFixed(1)),
       selection_reason: item.selection_reason,
+      comparison_basis: item.evidence.comparison_basis,
+      coordinate_role_hint: item.evidence.coordinate_role_hint,
+      evidence_strength: item.evidence.evidence_strength,
       is_selected: index < 2
     }));
 
   return {
     candidates,
     games,
-    warnings: seed.warnings || []
+    warnings: [
+      ...(seed.warnings || []),
+      ...(selected.length < 2 ? ["当前自动竞品坐标证据不足，系统已过滤掉仅靠标签命中的弱候选。"] : [])
+    ]
   };
 }
 
@@ -357,6 +369,172 @@ function similarityScore(baseValue, candidateValue, maxScore) {
 
   const ratio = Math.min(baseValue, candidateValue) / Math.max(baseValue, candidateValue);
   return ratio * maxScore;
+}
+
+function similarityRatio(baseValue, candidateValue) {
+  if (!baseValue || !candidateValue) {
+    return 0;
+  }
+
+  return Math.min(baseValue, candidateValue) / Math.max(baseValue, candidateValue);
+}
+
+function buildCompetitorEvidence({
+  targetTags,
+  targetMeta,
+  targetOwners,
+  targetPrice,
+  targetReviewCount,
+  targetCcu,
+  candidate,
+  spy
+}) {
+  const candidateTags = getTopSpecificTags(spy?.tags || {});
+  const sharedTags = candidateTags.filter((tag) => targetTags.includes(tag)).slice(0, 3);
+  const candidateOwners = parseOwnerRange(candidate.owners || spy?.owners);
+  const candidatePrice = normalizeSteamSpyPrice(spy?.price);
+  const candidateReviewCount = Number(spy?.positive || 0) + Number(spy?.negative || 0);
+  const candidateCcu = Number(spy?.ccu || 0);
+  const candidateMeta = buildSpyMeta(spy);
+  const sameSeries = hasCommonSeriesStem(candidate.name, targetMeta.name);
+  const sameDeveloper = candidateMeta.developers.some((value) => targetMeta.developers.includes(value));
+  const samePublisher = candidateMeta.publishers.some((value) => targetMeta.publishers.includes(value));
+  const priceSimilarityRatio = similarityRatio(targetPrice, candidatePrice);
+  const ownerSimilarityRatio = similarityRatio(targetOwners.midpoint, candidateOwners.midpoint);
+  const reviewSimilarityRatio = similarityRatio(targetReviewCount, candidateReviewCount);
+  const ccuSimilarityRatio = similarityRatio(targetCcu, candidateCcu);
+  const scaleSimilarityRatio = Math.max(ownerSimilarityRatio, reviewSimilarityRatio, ccuSimilarityRatio);
+  const hasRelationalEvidence = sameSeries || sameDeveloper || samePublisher;
+  const hasStrongExternalEvidence =
+    sharedTags.length >= 2 &&
+    (priceSimilarityRatio >= 0.45 || scaleSimilarityRatio >= 0.4);
+  const hasWeakOnlyTagEvidence = sharedTags.length > 0 && !hasRelationalEvidence && !hasStrongExternalEvidence;
+  const isComparable = hasRelationalEvidence || hasStrongExternalEvidence;
+
+  return {
+    same_series: sameSeries,
+    same_developer: sameDeveloper,
+    same_publisher: samePublisher,
+    shared_tags: sharedTags,
+    price_similarity_ratio: Number(priceSimilarityRatio.toFixed(2)),
+    owner_similarity_ratio: Number(ownerSimilarityRatio.toFixed(2)),
+    review_similarity_ratio: Number(reviewSimilarityRatio.toFixed(2)),
+    ccu_similarity_ratio: Number(ccuSimilarityRatio.toFixed(2)),
+    scale_similarity_ratio: Number(scaleSimilarityRatio.toFixed(2)),
+    is_comparable: isComparable,
+    evidence_strength: isComparable ? (hasRelationalEvidence ? "strong" : "medium") : "weak",
+    coordinate_role_hint: hasRelationalEvidence
+      ? (sameSeries ? "系列前作/同系列基准" : "团队谱系参照")
+      : (hasStrongExternalEvidence ? "同赛道外部样本" : "弱候选，不建议直接比较"),
+    comparison_basis: buildComparisonBasis({
+      sameSeries,
+      sameDeveloper,
+      samePublisher,
+      sharedTags,
+      priceSimilarityRatio,
+      scaleSimilarityRatio,
+      hasWeakOnlyTagEvidence
+    })
+  };
+}
+
+function buildComparisonBasis({
+  sameSeries,
+  sameDeveloper,
+  samePublisher,
+  sharedTags,
+  priceSimilarityRatio,
+  scaleSimilarityRatio,
+  hasWeakOnlyTagEvidence
+}) {
+  const basis = [];
+
+  if (sameSeries) {
+    basis.push("same_series");
+  }
+  if (sameDeveloper) {
+    basis.push("same_developer");
+  }
+  if (samePublisher) {
+    basis.push("same_publisher");
+  }
+  if (sharedTags.length >= 2) {
+    basis.push("multi_tag_overlap");
+  }
+  if (priceSimilarityRatio >= 0.45) {
+    basis.push("price_band_similarity");
+  }
+  if (scaleSimilarityRatio >= 0.4) {
+    basis.push("scale_similarity");
+  }
+  if (hasWeakOnlyTagEvidence) {
+    basis.push("tag_only_weak_signal");
+  }
+
+  return basis;
+}
+
+function buildBundleMeta(bundle) {
+  const store = bundle.store || {};
+  const spy = bundle.spy || {};
+  return {
+    name: store.name || spy.name || "",
+    developers: normalizeStringArray(store.developers?.length ? store.developers : splitCommaList(spy.developer)),
+    publishers: normalizeStringArray(store.publishers?.length ? store.publishers : splitCommaList(spy.publisher))
+  };
+}
+
+function buildSpyMeta(spy) {
+  return {
+    developers: normalizeStringArray(splitCommaList(spy?.developer)),
+    publishers: normalizeStringArray(splitCommaList(spy?.publisher))
+  };
+}
+
+function buildSelectionReasonV2(evidence, isPreferredReference = false, referenceName = "") {
+  const parts = [];
+
+  if (isPreferredReference) {
+    parts.push(referenceName ? `同系列参考作：${referenceName}` : "同系列参考作");
+  }
+  if (evidence.shared_tags.length) {
+    parts.push(`共享具体标签：${evidence.shared_tags.slice(0, 2).join(" / ")}`);
+  }
+  if (evidence.same_series) {
+    parts.push("同系列或同命名干线");
+  }
+  if (evidence.same_developer) {
+    parts.push("同开发团队");
+  }
+  if (evidence.same_publisher) {
+    parts.push("同发行团队");
+  }
+  if (evidence.price_similarity_ratio >= 0.6) {
+    parts.push("价格带接近");
+  }
+  if (evidence.scale_similarity_ratio >= 0.45) {
+    parts.push("体量级别接近");
+  }
+
+  if (!parts.length) {
+    parts.push("证据有限，不建议仅凭标签直接对比");
+  }
+
+  return parts.join("；");
+}
+
+function scoreCompetitorV2({ candidate, evidence }) {
+  let score = candidate.tagScore * 0.3;
+  score += evidence.shared_tags.length * 18;
+  score += evidence.same_series ? 120 : 0;
+  score += evidence.same_developer ? 75 : 0;
+  score += evidence.same_publisher ? 45 : 0;
+  score += evidence.price_similarity_ratio * 20;
+  score += evidence.scale_similarity_ratio * 28;
+  score += evidence.review_similarity_ratio * 16;
+  score += evidence.ccu_similarity_ratio * 12;
+  score += evidence.is_comparable ? 25 : -140;
+  return score;
 }
 
 function buildGameFromBundle(bundle, fetchedAt) {
