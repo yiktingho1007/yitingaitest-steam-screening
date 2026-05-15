@@ -1,9 +1,0 @@
-OPENAI_API_KEY=sk-uZtiWDJYsqjpeeCzqSkVPt18pBdZ9pY2z3GEYnwjq5kyuQ1Q
-OPENAI_MODEL=gpt-5.4-mini
-OPENAI_REASONING_EFFORT=low
-OPENAI_BASE_URL=https://ai.shukelongda.cn
-BACKUP_OPENAI_API_KEY=gi_client_ldkytijnkbr3jca2fnoplrx6sa9xtwey6wkw3zu2y361o2yg3p700bw7
-VOLCENGINE_API_KEY=gi_client_ldkytijnkbr3jca2fnoplrx6sa9xtwey6wkw3zu2y361o2yg3p700bw7
-VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-VOLCENGINE_MODEL=doubao-seed-1-6-250615
-VOLCENGINE_REASONING_EFFORT=low

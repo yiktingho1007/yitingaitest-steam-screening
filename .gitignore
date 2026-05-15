@@ -1,2 +1,23 @@
-prototype/.env.local
+# Local secrets
 .env.local
+prototype/.env.local
+prototype/browser-runtime-config.js
+
+# Local-only tunnel and runtime artifacts
+prototype/public-url.txt
+prototype/*.log
+prototype/server.stdout.log
+prototype/server.stderr.log
+prototype/serveo.stdout.log
+prototype/serveo.stderr.log
+prototype/localhostrun.stdout.log
+prototype/localhostrun.stderr.log
+prototype/tunnel.stdout.log
+prototype/tunnel.stderr.log
+
+# Accidental local copies
+prototype/.env - 副本.example
+
+# OS
+Thumbs.db
+Desktop.ini

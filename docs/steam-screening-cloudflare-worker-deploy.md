@@ -49,6 +49,11 @@ https://yitingaitest-steam-screening.workers.dev
 - `VOLCENGINE_MODEL`
 - `VOLCENGINE_REASONING_EFFORT`
 
+如果使用仓库自动发布，还需要在 GitHub 仓库 Secrets 中补两项：
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
 ## 推荐部署路径
 
 ### 方案 A：Cloudflare 仓库直连
@@ -61,6 +66,19 @@ https://yitingaitest-steam-screening.workers.dev
 6. 确认 Cloudflare 读取 [wrangler.toml](<D:\AI测试-何奕廷-高级游戏测评与研究专家\wrangler.toml:1>)
 7. 在 Dashboard 里填入上面的 Secrets
 8. 触发首次部署
+
+### 方案 A-2：GitHub Actions 自动发布
+
+仓库里已经包含：
+
+- `.github/workflows/deploy-cloudflare-workers.yml`
+
+只要在 GitHub 仓库里补好：
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+之后每次推送到 `main`，GitHub Actions 就会自动调用 Wrangler 发版。
 
 ### 方案 B：Wrangler CLI 部署
 
