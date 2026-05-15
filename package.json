@@ -1,12 +1,10 @@
 {
-  "name": "steam-screening-edgeone",
+  "name": "steam-screening-netlify",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:edgeone": "node scripts/build-edgeone.mjs",
-    "build:netlify": "node scripts/build-netlify.mjs",
-    "dev:edgeone": "edgeone pages dev",
-    "deploy:edgeone": "edgeone pages deploy"
+    "build": "node scripts/build-netlify.mjs",
+    "build:netlify": "node scripts/build-netlify.mjs"
   }
 }

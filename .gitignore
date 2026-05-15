@@ -14,8 +14,9 @@ prototype/localhostrun.stdout.log
 prototype/localhostrun.stderr.log
 prototype/tunnel.stdout.log
 prototype/tunnel.stderr.log
-.wrangler/
 dist/
+.netlify/
+.wrangler/
 
 # Accidental local copies
 prototype/.env - 副本.example

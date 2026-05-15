@@ -1,10 +1,9 @@
 # Public Deployment Result
 
 - Date: 2026-05-15
-- Status: Live
-- Public URL: `https://yitingaitest-steam-screening.yitingaitest.workers.dev`
-- Hosting: Cloudflare Workers
+- Status: Netlify-only deployment path retained
+- Hosting: Netlify
 - Notes:
-  - Runtime secrets are stored as Cloudflare Worker Secrets.
-  - Static assets are served through Workers Assets.
-  - The deployment no longer depends on the local machine staying online.
+  - Cloudflare Workers and EdgeOne are no longer maintained deployment targets.
+  - The current public production URL should be managed from the Netlify project dashboard.
+  - This repository now treats Netlify as the only supported online release path.

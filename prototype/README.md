@@ -1,20 +1,11 @@
 # Steam 产品初筛原型
 
-这版原型当前已经切成适合公网暴露的安全形态：
+这套原型当前只保留两条使用路径：
 
-- 本地服务实时拉真实 Steam 公开数据
-- 服务端代表网页去请求 LLM
-- 浏览器不再直接持有模型密钥
-- 公网静态访问已禁止读取 `.env.local`、`browser-runtime-config.js`、`server.js` 等敏感文件
+- 本地开发：用 Node 服务跑完整的原型链路
+- 正式部署：用 Netlify 托管静态页面和 Serverless Functions
 
-当前用户路径是：
-
-1. 输入游戏名
-2. 系统识别对应 Steam 产品
-3. 如果首轮没有结果，且输入里含中文，会先做一次英文名翻译重试
-4. 后端实时拉取目标产品和两款竞品的公开字段
-5. 后端一次性完成结构化分析与 LLM 总结
-6. 页面展示目标产品、竞品坐标系、对比结果和来源说明
+Cloudflare、EdgeOne 和临时隧道方案都已经弃用，不再作为维护目标。
 
 ## 本地启动
 
@@ -30,53 +21,18 @@ node server.js
 http://127.0.0.1:4173
 ```
 
-## 当前公网地址
+## 当前主链路
 
-当前这轮免费公网发布使用的是 `localhost.run`：
+1. 输入游戏名
+2. 系统识别对应 Steam 产品
+3. 如果首轮无结果且输入包含中文，会先做一次英文名翻译重试
+4. 后端实时拉取目标产品与竞品的公开字段
+5. 后端生成结构化结果并请求 LLM 输出初筛结论
+6. 页面展示目标产品、竞品坐标系、对比结果和来源说明
 
-```text
-https://f8f358d56b907f.lhr.life
-```
+## 数据来源
 
-说明：
-
-- 这是已验证可用的外网地址
-- 它是免费匿名隧道，所以域名是随机生成的
-- 我尝试过争取包含 `YitingAITest` 的免费子域名，但稳定的免费方案都需要注册账号或保留域名，不符合“免费直接可用”这个约束
-
-## 正式托管推荐
-
-如果要摆脱“依赖当前机器和隧道进程持续在线”，当前推荐的正式免费方案是：
-
-```text
-Cloudflare Workers
-```
-
-我已经把仓库部署所需的骨架准备好了：
-
-- [wrangler.toml](<D:\AI测试-何奕廷-高级游戏测评与研究专家\wrangler.toml:1>)
-- [cloudflare/worker.js](<D:\AI测试-何奕廷-高级游戏测评与研究专家\cloudflare\worker.js:1>)
-- [部署说明](<D:\AI测试-何奕廷-高级游戏测评与研究专家\docs\steam-screening-cloudflare-worker-deploy.md:1>)
-
-只要你把仓库建好并接到 Cloudflare，这套项目就可以走一个固定的 `workers.dev` 域名。按当前配置，目标名字就是：
-
-```text
-https://yitingaitest-steam-screening.workers.dev
-```
-
-## 一键重开公网入口
-
-如果这条免费公网地址失效，可以运行：
-
-```text
-prototype/start-public-tunnel.cmd
-```
-
-它会重新打开一条 `localhost.run` 免费公网入口，并在窗口里打印新的外网地址。保持那个窗口不要关闭即可。
-
-## 当前数据来源
-
-目标产品和竞品的结构化字段目前来自这些公开来源：
+当前主链路使用的公开来源包括：
 
 - Steam Store `appdetails`
 - Steam Reviews `appreviews`
@@ -84,11 +40,11 @@ prototype/start-public-tunnel.cmd
 - SteamSpy `appdetails`
 - Steam Store 搜索建议
 
-当前这一版已经不再依赖 mock 结构化数据作为主链路；mock 数据只保留给首页快捷样例与回归验证。
+`mock-data.js` 只保留给首页快捷样例和回归验证，不再承担正式分析主链路。
 
-## 密钥与网关配置
+## 环境变量
 
-服务端配置来自：
+服务端读取本地环境变量文件：
 
 ```text
 prototype/.env.local
@@ -96,23 +52,27 @@ prototype/.env.local
 
 当前支持：
 
-- 主网关：`OPENAI_API_KEY` / `OPENAI_BASE_URL`
-- 备用网关：`VOLCENGINE_API_KEY` / `VOLCENGINE_BASE_URL`
+- 主网关：`OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`
+- 备用网关：`VOLCENGINE_API_KEY` / `VOLCENGINE_BASE_URL` / `VOLCENGINE_MODEL`
 
-前端不会再直接读取这些值。
+前端不会直接读取这些值。
+
+## 正式部署
+
+当前正式部署只保留 Netlify。
+
+- 部署说明见 [Netlify 部署文档](../docs/steam-screening-netlify-deploy.md)
+- 站点构建配置见 [netlify.toml](../netlify.toml)
+- 构建脚本见 [build-netlify.mjs](../scripts/build-netlify.mjs)
 
 ## 本地验证
 
-这轮里程碑已经验证过：
+这套原型至少应满足：
 
-- 本地首页可访问
-- `/api/status`、`/api/resolve`、`/api/translate-query`、`/api/screen` 正常
-- 公网首页可访问
-- 公网接口可返回真实 `live` 分析结果
-- 公网无法直接读取敏感配置文件
+- 首页可访问
+- `/api/status`
+- `/api/resolve`
+- `/api/translate-query`
+- `/api/screen`
 
-## 当前限制
-
-- 免费公网域名是随机的，不保证永久不变
-- 这条公网入口依赖当前机器和隧道进程持续在线
-- 竞品选择规则已经可用，但还可以继续做更细的行业化调优
+都能正常返回
