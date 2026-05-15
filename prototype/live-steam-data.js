@@ -296,13 +296,30 @@ async function selectCompetitors({ targetAppId, targetBundle, gameplayProfile })
 }
 
 export async function hydrateSuggestedCompetitors({ targetAppId, suggestions = [] }) {
-  const normalizedSuggestions = normalizeStringArray(suggestions).slice(0, 5);
+  const normalizedSuggestions = (Array.isArray(suggestions) ? suggestions : [])
+    .map((item) => {
+      if (typeof item === "string") {
+        return {
+          name: cleanString(item),
+          why: "",
+          role: ""
+        };
+      }
+
+      return {
+        name: cleanString(item?.name),
+        why: cleanString(item?.why),
+        role: cleanString(item?.role)
+      };
+    })
+    .filter((item) => item.name)
+    .slice(0, 2);
   const selected = [];
   const seen = new Set([Number(targetAppId)]);
 
-  for (const name of normalizedSuggestions) {
-    const candidates = await fetchSearchSuggestions(name);
-    const exactMatch = candidates.find((item) => normalizeText(item.name) === normalizeText(name));
+  for (const suggestion of normalizedSuggestions) {
+    const candidates = await fetchSearchSuggestions(suggestion.name);
+    const exactMatch = candidates.find((item) => normalizeText(item.name) === normalizeText(suggestion.name));
     const selectedCandidate = exactMatch || candidates.find((item) => !seen.has(Number(item.appid)));
 
     if (!selectedCandidate) {
@@ -317,10 +334,12 @@ export async function hydrateSuggestedCompetitors({ targetAppId, suggestions = [
     seen.add(numericAppId);
     selected.push({
       appid: numericAppId,
-      name: selectedCandidate.name
+      name: selectedCandidate.name,
+      why: suggestion.why,
+      role: suggestion.role
     });
 
-    if (selected.length >= 3) {
+    if (selected.length >= 2) {
       break;
     }
   }
@@ -337,12 +356,12 @@ export async function hydrateSuggestedCompetitors({ targetAppId, suggestions = [
       app_id: item.appid,
       name: item.name,
       total_score: 75 - index * 5,
-      selection_reason: "由 LLM 基于玩法识别提名，再映射回 Steam 产品。",
+      selection_reason: item.why || "它和目标产品共享同一类核心玩法循环，适合拿来做同赛道比较。",
       comparison_basis: ["llm_gameplay_discovery"],
-      coordinate_role_hint: "LLM 提名赛道样本",
+      coordinate_role_hint: item.role || "同赛道外部样本",
       evidence_strength: "medium",
-      role_matches: ["同赛道外部样本"],
-      is_selected: index < 2
+      role_matches: [item.role || "同赛道外部样本"],
+      is_selected: true
     })),
     games
   };

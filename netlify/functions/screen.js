@@ -47,7 +47,7 @@ export default async function handler(request) {
       if (discovery.ok && discovery.suggestions.length) {
         const hydrated = await hydrateSuggestedCompetitors({
           targetAppId: appid,
-          suggestions: discovery.suggestions.map((item) => item.name)
+          suggestions: discovery.suggestions
         });
 
         report.competitor_candidates = hydrated.candidates;
